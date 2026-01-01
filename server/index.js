@@ -8,6 +8,8 @@ const path = require('path');
 const app = express();
 app.use(cors());
 
+app.get('/ping', (req, res) => res.send('pong'));
+
 const server = http.createServer(app);
 
 const io = new Server(server, {
@@ -91,6 +93,7 @@ io.on('connection', (socket) => {
     });
 
     socket.on('get_history', ({ partner }, callback) => {
+        if (!socket.username || !partner) return;
         const myUser = socket.username.toLowerCase();
         const otherUser = partner.toLowerCase();
 
@@ -102,6 +105,7 @@ io.on('connection', (socket) => {
     });
 
     socket.on('get_contacts', (callback) => {
+        if (!socket.username) return;
         // Find all unique users this user has interacted with
         const contacts = new Set();
         const myUser = socket.username.toLowerCase();
@@ -116,6 +120,7 @@ io.on('connection', (socket) => {
     });
 
     socket.on('delete_message', ({ messageId, partner }) => {
+        if (!socket.username || !partner) return;
         const myUser = socket.username.toLowerCase();
         const otherUser = partner.toLowerCase();
 
@@ -124,10 +129,6 @@ io.on('connection', (socket) => {
 
         if (msgIndex !== -1) {
             const msg = messages[msgIndex];
-            // Only allow if the requester is the sender or recipient (usually sender deletes their own)
-            // Ideally only sender can delete for everyone, or both can delete for themselves. 
-            // Requirement implies "delete particular chat" -> remove for both usually? 
-            // Let's assume sender deletes for everyone.
             if (msg.from === socket.username) {
                 messages.splice(msgIndex, 1);
                 saveData(MESSAGES_FILE, messages);
@@ -145,6 +146,7 @@ io.on('connection', (socket) => {
     });
 
     socket.on('delete_conversation', ({ partner }) => {
+        if (!socket.username || !partner) return;
         const myUser = socket.username.toLowerCase();
         const otherUser = partner.toLowerCase();
 
@@ -163,6 +165,7 @@ io.on('connection', (socket) => {
     });
 
     socket.on('mark_seen', ({ partner }) => {
+        if (!socket.username || !partner) return;
         const myUser = socket.username.toLowerCase();
         const otherUser = partner.toLowerCase();
         let updated = false;
@@ -191,6 +194,7 @@ io.on('connection', (socket) => {
     });
 
     socket.on('private_message', ({ to, text }) => {
+        if (!socket.username || !to || !text) return;
         console.log(`Message from ${socket.username} to ${to}: ${text}`);
         const message = {
             id: Date.now(),
@@ -217,20 +221,33 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => {
         console.log('User disconnected', socket.id);
-        if (socket.username) {
-            const lowerUser = socket.username.toLowerCase();
-            if (users[lowerUser]) {
-                users[lowerUser].online = false;
-                users[lowerUser].lastSeen = new Date().toISOString();
-                saveData(USERS_FILE, users);
-                io.emit('user_status', { username: socket.username, online: false });
+        try {
+            if (socket.username) {
+                const lowerUser = socket.username.toLowerCase();
+                if (users[lowerUser]) {
+                    users[lowerUser].online = false;
+                    users[lowerUser].lastSeen = new Date().toISOString();
+                    saveData(USERS_FILE, users);
+                    io.emit('user_status', { username: socket.username, online: false });
+                }
             }
+        } catch (e) {
+            console.error('Error in disconnect handler:', e);
         }
     });
 });
 
+process.on('uncaughtException', (err) => {
+    console.error('UNCAUGHT EXCEPTION:', err);
+    // Keep server running if possible, or at least log why it died
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('UNHANDLED REJECTION:', reason);
+});
+
 const PORT = 3001;
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
     console.log('--- SERVER RESTARTED WITH SEEN FEATURE & ACTIVE STATUS ---');
 });
